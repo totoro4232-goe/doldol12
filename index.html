@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Breakout</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Orbitron', sans-serif;
+            background-color: #0f172a;
+            color: white;
+            margin: 0;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background-color: #020617;
+            box-shadow: 0 0 50px rgba(59, 130, 246, 0.2);
+        }
+
+        .ui-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .glow-text {
+            text-shadow: 0 0 10px rgba(59, 130, 246, 0.8);
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen">
+
+    <!-- 상단 정보 바 -->
+    <div class="fixed top-4 left-0 right-0 px-6 flex justify-between items-center z-10 pointer-events-none">
+        <div class="ui-panel px-6 py-2 rounded-2xl flex items-center gap-4">
+            <div>
+                <span class="text-[10px] text-gray-400 block uppercase tracking-wider">Score</span>
+                <span id="score" class="text-xl font-bold text-blue-400 glow-text">0</span>
+            </div>
+            <div class="w-[1px] h-8 bg-gray-700"></div>
+            <div>
+                <span class="text-[10px] text-gray-400 block uppercase tracking-wider">Lives</span>
+                <div id="lives" class="flex gap-1 text-red-500">
+                    <i class="fa-solid fa-heart"></i>
+                    <i class="fa-solid fa-heart"></i>
+                    <i class="fa-solid fa-heart"></i>
+                </div>
+            </div>
+        </div>
+        
+        <div class="ui-panel px-6 py-2 rounded-2xl">
+            <span class="text-[10px] text-gray-400 block uppercase tracking-wider text-right">Level</span>
+            <span id="level" class="text-xl font-bold text-purple-400 glow-text">1</span>
+        </div>
+    </div>
+
+    <!-- 게임 화면 -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- 게임 시작/종료 안내 -->
+    <div id="overlay" class="fixed inset-0 bg-black/80 flex flex-col items-center justify-center z-20">
+        <div class="text-center p-8 rounded-3xl ui-panel max-w-sm">
+            <h1 id="statusTitle" class="text-4xl font-bold mb-2 glow-text text-blue-500 tracking-tighter">NEON BREAKOUT</h1>
+            <p id="statusMsg" class="text-gray-400 text-sm mb-8">화면을 클릭하여 시작하세요</p>
+            <button onclick="startGame()" class="bg-blue-600 hover:bg-blue-700 text-white px-10 py-3 rounded-full font-bold transition-all shadow-lg shadow-blue-500/20">
+                START GAME
+            </button>
+            <div class="mt-8 grid grid-cols-2 gap-4 text-[10px] text-gray-500">
+                <div class="flex items-center gap-2"><i class="fa-solid fa-mouse"></i> 마우스/터치 이동</div>
+                <div class="flex items-center gap-2"><i class="fa-solid fa-bolt"></i> 벽돌을 깨고 레벨업</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('overlay');
+        const scoreEl = document.getElementById('score');
+        const livesEl = document.getElementById('lives');
+        const levelEl = document.getElementById('level');
+        const titleEl = document.getElementById('statusTitle');
+        const msgEl = document.getElementById('statusMsg');
+
+        // 게임 설정
+        let gameRunning = false;
+        let score = 0;
+        let lives = 3;
+        let level = 1;
+        
+        // 패들 설정
+        let paddleHeight = 12;
+        let paddleWidth = 100;
+        let paddleX;
+        
+        // 공 설정
+        let ballRadius = 6;
+        let x, y, dx, dy;
+        let ballSpeed = 4;
+
+        // 벽돌 설정
+        let brickRowCount = 3;
+        let brickColumnCount = 6;
+        let brickWidth;
+        let brickHeight = 24;
+        let brickPadding = 10;
+        let brickOffsetTop = 100;
+        let brickOffsetLeft = 20;
+        let bricks = [];
+
+        // 입자(파티클) 효과
+        let particles = [];
+
+        function initBricks() {
+            brickColumnCount = Math.floor((canvas.width - brickOffsetLeft * 2) / (brickWidth + brickPadding));
+            const actualOffset = (canvas.width - (brickColumnCount * (brickWidth + brickPadding) - brickPadding)) / 2;
+            
+            for (let c = 0; c < brickColumnCount; c++) {
+                bricks[c] = [];
+                for (let r = 0; r < brickRowCount; r++) {
+                    bricks[c][r] = { x: 0, y: 0, status: 1, color: `hsl(${(c * 60 + r * 20) % 360}, 70%, 60%)` };
+                }
+            }
+        }
+
+        function resize() {
+            canvas.width = Math.min(window.innerWidth, 800);
+            canvas.height = window.innerHeight;
+            brickWidth = (canvas.width - (brickOffsetLeft * 2) - (brickColumnCount - 1) * brickPadding) / brickColumnCount;
+            if (brickWidth < 40) { // 화면이 너무 작을 때 컬럼 수 조정
+                brickColumnCount = 4;
+                brickWidth = (canvas.width - (brickOffsetLeft * 2) - (brickColumnCount - 1) * brickPadding) / brickColumnCount;
+            }
+            paddleX = (canvas.width - paddleWidth) / 2;
+            resetBall();
+            initBricks();
+        }
+
+        function resetBall() {
+            x = canvas.width / 2;
+            y = canvas.height - 50;
+            dx = ballSpeed * (Math.random() > 0.5 ? 1 : -1);
+            dy = -ballSpeed;
+        }
+
+        function startGame() {
+            if (lives <= 0 || titleEl.innerText === "SUCCESS") {
+                score = 0;
+                lives = 3;
+                level = 1;
+                ballSpeed = 4;
+                brickRowCount = 3;
+            }
+            overlay.classList.add('hidden');
+            gameRunning = true;
+            resetBall();
+            initBricks();
+            updateUI();
+            requestAnimationFrame(draw);
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            overlay.classList.remove('hidden');
+            titleEl.innerText = "GAME OVER";
+            titleEl.className = "text-4xl font-bold mb-2 glow-text text-red-500 tracking-tighter";
+            msgEl.innerText = `최종 점수: ${score}`;
+        }
+
+        function levelUp() {
+            level++;
+            ballSpeed += 0.5;
+            brickRowCount = Math.min(brickRowCount + 1, 8);
+            initBricks();
+            resetBall();
+            updateUI();
+        }
+
+        function updateUI() {
+            scoreEl.innerText = score;
+            levelEl.innerText = level;
+            livesEl.innerHTML = '<i class="fa-solid fa-heart"></i>'.repeat(lives);
+        }
+
+        // 파티클 생성
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 8; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    radius: Math.random() * 3,
+                    color: color,
+                    velocity: {
+                        x: (Math.random() - 0.5) * 5,
+                        y: (Math.random() - 0.5) * 5
+                    },
+                    alpha: 1
+                });
+            }
+        }
+
+        // 조작 이벤트
+        document.addEventListener("mousemove", mouseMoveHandler, false);
+        document.addEventListener("touchmove", touchMoveHandler, { passive: false });
+
+        function mouseMoveHandler(e) {
+            const relativeX = e.clientX - canvas.offsetLeft;
+            if (relativeX > 0 && relativeX < canvas.width) {
+                paddleX = relativeX - paddleWidth / 2;
+            }
+        }
+
+        function touchMoveHandler(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const relativeX = touch.clientX - canvas.offsetLeft;
+            if (relativeX > 0 && relativeX < canvas.width) {
+                paddleX = relativeX - paddleWidth / 2;
+            }
+        }
+
+        function collisionDetection() {
+            let activeBricks = 0;
+            for (let c = 0; c < brickColumnCount; c++) {
+                for (let r = 0; r < brickRowCount; r++) {
+                    const b = bricks[c][r];
+                    if (b.status === 1) {
+                        activeBricks++;
+                        if (x > b.x && x < b.x + brickWidth && y > b.y && y < b.y + brickHeight) {
+                            dy = -dy;
+                            b.status = 0;
+                            score += 10;
+                            createParticles(x, y, b.color);
+                            updateUI();
+                            if (activeBricks === 1) {
+                                levelUp();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function drawBall() {
+            ctx.beginPath();
+            ctx.arc(x, y, ballRadius, 0, Math.PI * 2);
+            ctx.fillStyle = "#fff";
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = "#3b82f6";
+            ctx.fill();
+            ctx.closePath();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawPaddle() {
+            ctx.beginPath();
+            ctx.roundRect(paddleX, canvas.height - paddleHeight - 20, paddleWidth, paddleHeight, 6);
+            ctx.fillStyle = "#3b82f6";
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "#3b82f6";
+            ctx.fill();
+            ctx.closePath();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawBricks() {
+            for (let c = 0; c < brickColumnCount; c++) {
+                for (let r = 0; r < brickRowCount; r++) {
+                    if (bricks[c][r].status === 1) {
+                        const brickX = c * (brickWidth + brickPadding) + brickOffsetLeft;
+                        const brickY = r * (brickHeight + brickPadding) + brickOffsetTop;
+                        bricks[c][r].x = brickX;
+                        bricks[c][r].y = brickY;
+                        
+                        ctx.beginPath();
+                        ctx.roundRect(brickX, brickY, brickWidth, brickHeight, 4);
+                        ctx.fillStyle = bricks[c][r].color;
+                        ctx.fill();
+                        ctx.closePath();
+                    }
+                }
+            }
+        }
+
+        function handleParticles() {
+            for (let i = 0; i < particles.length; i++) {
+                const p = particles[i];
+                p.x += p.velocity.x;
+                p.y += p.velocity.y;
+                p.alpha -= 0.02;
+                
+                ctx.save();
+                ctx.globalAlpha = p.alpha;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fillStyle = p.color;
+                ctx.fill();
+                ctx.restore();
+
+                if (p.alpha <= 0) {
+                    particles.splice(i, 1);
+                    i--;
+                }
+            }
+        }
+
+        function draw() {
+            if (!gameRunning) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawBricks();
+            drawBall();
+            drawPaddle();
+            handleParticles();
+            collisionDetection();
+
+            // 벽 충돌 검사
+            if (x + dx > canvas.width - ballRadius || x + dx < ballRadius) {
+                dx = -dx;
+                createParticles(x, y, "#fff");
+            }
+            if (y + dy < ballRadius) {
+                dy = -dy;
+                createParticles(x, y, "#fff");
+            } else if (y + dy > canvas.height - ballRadius - 20) {
+                // 패들 충돌 검사
+                if (x > paddleX && x < paddleX + paddleWidth) {
+                    // 패들의 어디에 맞았느냐에 따라 튕겨나가는 각도 조절
+                    let impactPos = (x - (paddleX + paddleWidth / 2)) / (paddleWidth / 2);
+                    dx = impactPos * ballSpeed;
+                    dy = -dy;
+                } else if (y + dy > canvas.height) {
+                    lives--;
+                    updateUI();
+                    if (!lives) {
+                        gameOver();
+                    } else {
+                        resetBall();
+                    }
+                }
+            }
+
+            x += dx;
+            y += dy;
+
+            requestAnimationFrame(draw);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+    </script>
+</body>
+</html>
